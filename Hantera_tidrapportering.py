@@ -11,6 +11,7 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 import sys
+from weekly_category_report import create_category_report
 
 # ============================================================================
 # KONFIGURATION
@@ -19,6 +20,7 @@ import sys
 INPUT_FILE = r"C:\Users\freha296\Documents\Administrativt\All_my_time.tsv"
 ANTURA_OUTPUT_FILE = "Tidrapport_Antura.xlsx"
 FLEX_OUTPUT_FILE = "Tidrapport_Flex.xlsx"
+CATEGORY_OUTPUT_FILE = "Tidrapport_Kategoriserad.html"
 
 # ============================================================================
 # FUNKTIONER
@@ -383,7 +385,7 @@ def create_flex_report(df: pl.DataFrame, output_file: str):
 
     print(f"Flex rapport - antal rader: {len(df)}")
     print(f"Kolumner: {df.columns}")
-    print(f"Första raden: {df.head(1)}")
+    # print(f"Första raden: {df.head(1)}")  # Kommenterad pga encoding-problem
 
     # Skapa Excel-arbetsbok
     wb = openpyxl.Workbook()
@@ -535,6 +537,10 @@ def main():
     # 8. Skapa flextidsrapport
     print("\nSkapar flextidsrapport...")
     create_flex_report(type_df, FLEX_OUTPUT_FILE)
+
+    # 9. Skapa kategoriserad veckerapport
+    print("\nSkapar kategoriserad veckerapport (20 veckor)...")
+    create_category_report(main_df, CATEGORY_OUTPUT_FILE, weeks_back=20)
 
     print("\n=== Klart! ===")
 
