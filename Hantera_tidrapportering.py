@@ -544,7 +544,7 @@ def main():
 
     print("\n=== Klart! ===")
 
-    time.sleep(5)
+    time.sleep(30)
 
 
 if __name__ == "__main__":
