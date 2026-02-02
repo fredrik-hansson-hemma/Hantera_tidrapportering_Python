@@ -1,0 +1,20 @@
+[project]
+name = "hantera-tidrapportering"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Fredrik Hansson",email = "fredrik.hansson@ucr.uu.se"}
+]
+requires-python = "^3.13"
+dependencies = [
+    "polars (>=1.37.1,<2.0.0)",
+    "openpyxl (>=3.1.5,<4.0.0)",
+    "plotly (>=6.5.2,<7.0.0)",
+    "numpy (>=2.4.2,<3.0.0)",
+    "python-dateutil (>=2.9.0.post0,<3.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
