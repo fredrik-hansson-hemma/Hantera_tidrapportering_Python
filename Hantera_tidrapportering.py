@@ -17,7 +17,7 @@ from weekly_category_report import create_category_report
 # KONFIGURATION
 # ============================================================================
 
-INPUT_FILE = r"C:\Users\freha296\Documents\Administrativt\All_my_time.tsv"
+INPUT_FILE = r"C:\Users\freha296\OneDrive - Uppsala universitet\Documents\Administrativt\All_my_time.tsv"
 ANTURA_OUTPUT_FILE = "Tidrapport_Antura.xlsx"
 FLEX_OUTPUT_FILE = "Tidrapport_Flex.xlsx"
 CATEGORY_OUTPUT_FILE = "Tidrapport_Kategoriserad.html"
