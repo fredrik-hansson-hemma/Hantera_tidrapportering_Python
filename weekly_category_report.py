@@ -12,12 +12,15 @@ import plotly.graph_objects as go
 def categorize_work_items(df: pl.DataFrame) -> pl.DataFrame:
     """
     Kategoriserar Work Items i tre kategorier:
-    1. 'Övrig tid' - börjar med "Övrig tid"
+    1. 'Övrig tid' - börjar med "Övrig tid" eller innehåller "Arkitekturråd"
     2. 'Python/Soreg' - innehåller "Python" eller "soreg" (case-insensitive)
     3. 'Team Sol' - alla andra poster
     """
     df = df.with_columns([
-        pl.when(pl.col("Work Item").str.starts_with("Övrig tid"))
+        pl.when(
+            pl.col("Work Item").str.starts_with("Övrig tid") |
+            pl.col("Work Item").str.to_lowercase().str.contains("arkitekturråd")
+        )
         .then(pl.lit("Övrig tid"))
         .when(
             pl.col("Work Item").str.to_lowercase().str.contains("python") |
