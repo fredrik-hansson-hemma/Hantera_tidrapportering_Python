@@ -5,6 +5,7 @@ Kategoriserar tidsposter i tre grupper: Övrigt, Python/Soreg, och Övrig tid
 """
 
 import polars as pl
+import sys
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 
@@ -356,8 +357,24 @@ def generate_html_report(week_data: list, output_file: str = "Tidrapport_Kategor
 """
 
     # Skriv till fil
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(html)
+    def _write_html():
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(html)
+
+    while True:
+        try:
+            _write_html()
+            break
+        except PermissionError:
+            print(f"\nKunde inte skriva till '{output_file}'.")
+            print("Filen kan vara öppen i ett annat program.")
+            print("  1. Försök igen")
+            print("  2. Avsluta programmet")
+            val = input("Välj (1/2): ").strip()
+            if val == "2":
+                print("Avslutar.")
+                sys.exit(1)
+            print("Försöker igen...")
 
     print(f"Kategoriserad veckerapport sparad: {output_file}")
 
