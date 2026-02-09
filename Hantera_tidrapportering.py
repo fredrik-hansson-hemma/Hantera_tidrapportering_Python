@@ -352,9 +352,9 @@ def create_antura_report(df: pl.DataFrame, output_file: str):
         ]
 
         # Skriv till Excel
-        monday = datetime.strptime(f"{ar}-W{vecka:02d}-1", "%G-W%V-%u").date()
-        sunday = monday + timedelta(days=6)
-        ws.append([f"Vecka {vecka}: {monday} - {sunday}"])
+        first_day = week_data.select(pl.col("startdatum").min()).item()
+        last_day = week_data.select(pl.col("startdatum").max()).item()
+        ws.append([f"Vecka {vecka}: {first_day} - {last_day}"])
         ws.append([])
 
         # Headers
