@@ -12,12 +12,14 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 import sys
 from weekly_category_report import create_category_report
+from grindstone_reader import load_grindstone_data
 
 # ============================================================================
 # KONFIGURATION
 # ============================================================================
 
 INPUT_FILE = r"C:\Users\freha296\OneDrive - Uppsala universitet\Documents\Administrativt\All_my_time.tsv"
+GRINDSTONE_FILE = r"C:\Users\freha296\OneDrive - Uppsala universitet\Documents\My Grindstone Database.gsjdb"
 ANTURA_OUTPUT_FILE = "Tidrapport_Antura.xlsx"
 FLEX_OUTPUT_FILE = "Tidrapport_Flex.xlsx"
 CATEGORY_OUTPUT_FILE = "Tidrapport_Kategoriserad.html"
@@ -25,6 +27,27 @@ CATEGORY_OUTPUT_FILE = "Tidrapport_Kategoriserad.html"
 # ============================================================================
 # FUNKTIONER
 # ============================================================================
+
+
+def save_with_retry(save_func, output_file: str) -> None:
+    """
+    Försöker spara en fil. Vid PermissionError (t.ex. filen öppen i Excel)
+    får användaren välja att försöka igen eller avsluta programmet.
+    """
+    while True:
+        try:
+            save_func()
+            return
+        except PermissionError:
+            print(f"\nKunde inte skriva till '{output_file}'.")
+            print("Filen kan vara öppen i ett annat program (t.ex. Excel).")
+            print("  1. Försök igen")
+            print("  2. Avsluta programmet")
+            val = input("Välj (1/2): ").strip()
+            if val == "2":
+                print("Avslutar.")
+                sys.exit(1)
+            print("Försöker igen...")
 
 
 def load_time_data(filepath: str) -> pl.DataFrame:
@@ -329,7 +352,9 @@ def create_antura_report(df: pl.DataFrame, output_file: str):
         ]
 
         # Skriv till Excel
-        ws.append(["Vecka " + str(vecka)])
+        monday = datetime.strptime(f"{ar}-W{vecka:02d}-1", "%G-W%V-%u").date()
+        sunday = monday + timedelta(days=6)
+        ws.append([f"Vecka {vecka}: {monday} - {sunday}"])
         ws.append([])
 
         # Headers
@@ -373,7 +398,7 @@ def create_antura_report(df: pl.DataFrame, output_file: str):
                 ws.append(list(row))
 
     # Spara
-    wb.save(output_file)
+    save_with_retry(lambda: wb.save(output_file), output_file)
     print(f"Antura-rapport sparad: {output_file}")
 
 
@@ -493,7 +518,7 @@ def create_flex_report(df: pl.DataFrame, output_file: str):
     ws.column_dimensions["E"].width = 12
 
     # Spara
-    wb.save(output_file)
+    save_with_retry(lambda: wb.save(output_file), output_file)
     print(f"Flextidsrapport sparad: {output_file}")
 
 
@@ -505,10 +530,23 @@ def create_flex_report(df: pl.DataFrame, output_file: str):
 def main():
     print("=== Tidrapportering - Python version ===\n")
 
-    # 1. Läs in data
+    # 1. Läs in data (försök Grindstone först, sedan TSV)
     print("Läser in data...")
-    df = load_time_data(INPUT_FILE)
-    print(f"Läste {len(df)} rader")
+    df = None
+
+    try:
+        print(f"  Försöker läsa Grindstone-databas: {GRINDSTONE_FILE}")
+        df = load_grindstone_data(GRINDSTONE_FILE)
+        print(f"  Läste {len(df)} rader från Grindstone-databasen")
+    except FileNotFoundError:
+        print(f"  Grindstone-fil saknas: {GRINDSTONE_FILE}")
+    except Exception as e:
+        print(f"  Kunde inte läsa Grindstone-databas: {e}")
+
+    if df is None:
+        print(f"  Faller tillbaka till TSV: {INPUT_FILE}")
+        df = load_time_data(INPUT_FILE)
+        print(f"  Läste {len(df)} rader från TSV")
 
     # 2. Lägg till härledda kolumner
     print("\nLägger till härledda kolumner...")
