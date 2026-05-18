@@ -1,0 +1,5 @@
+Det här är ett program för att hantera tidrapportering. Programmet läser in en csv-fil och producerar ett par olika rapporter. CSV-filerna är exporter från Grindstone Timetracker. Jag har lärt mig att Grindstone lagrar sin information i en SQLite-databas.
+Jag undrar om det skulle vara möjligt att läsa informationen direkt därifrån?
+Finns det några risker med det? Att programmet låser filen för Grindstone till exempel?
+Databasen ligger här:
+"C:\Users\freha296\OneDrive - Uppsala universitet\Documents\My Grindstone Database.gsjdb"

@@ -20,9 +20,9 @@ from grindstone_reader import load_grindstone_data
 
 INPUT_FILE = r"C:\Users\freha296\OneDrive - Uppsala universitet\Documents\Administrativt\All_my_time.tsv"
 GRINDSTONE_FILE = r"C:\Users\freha296\OneDrive - Uppsala universitet\Documents\My Grindstone Database.gsjdb"
-ANTURA_OUTPUT_FILE = "Tidrapport_Antura.xlsx"
-FLEX_OUTPUT_FILE = "Tidrapport_Flex.xlsx"
-CATEGORY_OUTPUT_FILE = "Tidrapport_Kategoriserad.html"
+ANTURA_OUTPUT_FILE = "data/Tidrapport_Antura.xlsx"
+FLEX_OUTPUT_FILE = "data/Tidrapport_Flex.xlsx"
+CATEGORY_OUTPUT_FILE = "data/Tidrapport_Kategoriserad.html"
 
 # ============================================================================
 # FUNKTIONER
@@ -530,6 +530,8 @@ def create_flex_report(df: pl.DataFrame, output_file: str):
 def main():
     print("=== Tidrapportering - Python version ===\n")
 
+    Path("data").mkdir(exist_ok=True)
+
     # 1. Läs in data (försök Grindstone först, sedan TSV)
     print("Läser in data...")
     df = None
@@ -582,7 +584,6 @@ def main():
 
     print("\n=== Klart! ===")
 
-    time.sleep(30)
 
 
 if __name__ == "__main__":

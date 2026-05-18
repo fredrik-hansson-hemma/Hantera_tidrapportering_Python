@@ -1,8 +1,7 @@
-Tidrapport_Antura.xlsx
-Tidrapport_Flex.xlsx
-Tidrapport_Kategoriserad.html
+data/
+chrome_profile/
 poetry.lock
-Försök 1.ipynb
-Försök 2.ipynb
 *.pyc
 tmpclaude*
+__pycache__/
+.venv/

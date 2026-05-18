@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Projekt\\\\GitHub\\\\Hantera_tidrapportering_Python\" -Depth 0)",
+      "Bash(Select-Object Name, Attributes)"
+    ]
+  }
+}
