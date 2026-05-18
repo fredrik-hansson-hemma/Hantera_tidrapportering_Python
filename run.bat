@@ -1,4 +1,4 @@
 .venv\Scripts\python.exe Hantera_tidrapportering.py
 
 @echo Off
-timeout 30
+timeout 5
