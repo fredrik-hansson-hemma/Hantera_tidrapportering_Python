@@ -10,6 +10,11 @@
 
 Det är allt. Inloggning behövs normalt bara första gången – sessionen sparas sedan.
 
+Skriptet visar alltid tydligt var du ska göra något:
+
+- **👉 GÖR I CHROME:** – något ska göras i Chrome-fönstret (logga in, granska, skicka in).
+- **⌨️ HÄR I TERMINALEN:** – skriptet väntar på ett svar i terminalfönstret.
+
 ---
 
 ## Vad som händer i varje steg
@@ -84,6 +89,16 @@ Det här händer i tur och ordning:
 7. **Sparar markeringar** – `data\Tidrapport_Antura.xlsx` sparas med färgmarkeringar
    och kommentarer på de rader som var osäkra eller inte matchade.
    Granska gula och röda rader innan du skickar.
+
+8. **Visar en meny** – efter varje vecka granskar du och skickar in i Antura,
+   och väljer sedan i terminalen:
+
+   | Val | Åtgärd |
+   |---|---|
+   | Enter | Fortsätt till nästa vecka (eller avsluta efter sista veckan) |
+   | F | Töm veckans ej inskickade fält och fyll i på nytt – t.ex. efter att du lagt till nya rader i Antura |
+   | O | Öppna Excel-filen för att jämföra med Antura (stäng den innan du går vidare) |
+   | A | Avsluta |
 
 ### Kontrollera och skicka manuellt
 

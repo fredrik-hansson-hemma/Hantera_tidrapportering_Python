@@ -19,7 +19,7 @@ def save_with_retry(save_func, output_file) -> None:
             print("Filen kan vara öppen i ett annat program (t.ex. Excel).")
             print("  1. Försök igen")
             print("  2. Avsluta programmet")
-            val = input("Välj (1/2): ").strip()
+            val = input("\n  ⌨️  HÄR I TERMINALEN: Välj (1/2): ").strip()
             if val == "2":
                 print("Avslutar.")
                 sys.exit(1)

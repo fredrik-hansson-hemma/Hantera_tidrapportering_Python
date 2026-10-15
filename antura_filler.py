@@ -16,6 +16,7 @@ Skriptet:
 """
 
 import asyncio
+import os
 import re
 import sys
 from datetime import date, timedelta
@@ -128,9 +129,22 @@ def monday_of(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-async def wait_for_enter(prompt: str):
-    """Skriver ut en prompt och väntar på Enter utan att blockera event-loopen."""
-    await asyncio.to_thread(input, prompt)
+# ----------------------------------------------------------------------------
+# Användardialog – två tydliga markeringar så att det alltid syns var du ska
+# göra något: 👉 i Chrome-fönstret eller ⌨️ här i terminalen.
+# ----------------------------------------------------------------------------
+
+def tell_chrome(first_line: str, *more_lines: str):
+    """Talar om att något ska göras i Chrome-fönstret."""
+    print(f"\n  👉 GÖR I CHROME: {first_line}")
+    for line in more_lines:
+        print(f"     {line}")
+
+
+async def ask_here(prompt: str) -> str:
+    """Frågar i terminalen utan att blockera event-loopen. Returnerar svaret."""
+    answer = await asyncio.to_thread(input, f"\n  ⌨️  HÄR I TERMINALEN: {prompt}")
+    return answer.strip()
 
 
 # ============================================================================
@@ -484,8 +498,10 @@ async def wait_for_antura_ready(page, timeout_s: float = 600) -> bool:
             pass  # Sidan navigerar just nu, försök igen strax
 
         if not asked_login:
-            print("\n  👉 Logga in på Antura i Chrome-fönstret.")
-            print("     Skriptet fortsätter automatiskt när tidrapporteringen visas…")
+            tell_chrome(
+                "Logga in på Antura.",
+                "Skriptet fortsätter av sig självt när tidrapporteringen visas.",
+            )
             asked_login = True
         await asyncio.sleep(2)
 
@@ -699,10 +715,9 @@ async def process_week(
     # får användaren titta i Chrome och försöka igen.
     antura_rows = await wait_for_stable_rows(page)
     if not antura_rows:
-        await wait_for_enter(
-            "  ⚠️  Hittade inga aktivitetsrader. Kontrollera sidan i Chrome och\n"
-            "     tryck ENTER här för att försöka igen… "
-        )
+        print("\n  ⚠️  Hittade inga aktivitetsrader.")
+        tell_chrome(f"Kontrollera att tidrapporteringen för vecka {week_num} visas.")
+        await ask_here("Tryck Enter för att försöka igen… ")
         antura_rows = await wait_for_stable_rows(page)
     print(f"  Aktivitetsrader: {len(antura_rows)} st")
     if not antura_rows:
@@ -780,6 +795,65 @@ def print_week_notes(week_notes: list[dict], results: list[dict]):
         note_text = "\n       ".join(n["note"].splitlines())
         hours = f"{n['hours']:.2f}".replace(".", ",")
         print(f"      \"{note_text}\"  ({hours} h)")
+
+
+async def clear_week(page) -> int:
+    """
+    Tömmer alla redigerbara tidsfält på sidan (låsta, redan inskickade fält
+    rörs inte). Returnerar antal fält som hade ett värde.
+    """
+    return await page.evaluate("""
+        () => {
+            let cleared = 0;
+            const sel = '.reportingField input:not([disabled]):not([readonly])';
+            for (const inp of document.querySelectorAll(sel)) {
+                if (!inp.value) continue;
+                inp.value = '';
+                inp.dispatchEvent(new Event('input',  { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                cleared++;
+            }
+            return cleared;
+        }
+    """)
+
+
+def open_excel():
+    """Öppnar Excel-filen i det program som är kopplat till .xlsx."""
+    try:
+        os.startfile(EXCEL_FILE)
+        print(f"     Öppnar {EXCEL_FILE.name}. Stäng den innan du går vidare,")
+        print("     annars kan markeringarna inte sparas.")
+    except OSError as e:
+        print(f"     ⚠️  Kunde inte öppna {EXCEL_FILE}: {e}")
+
+
+async def week_menu(week_num: int, next_week: int | None, has_notes: bool) -> str:
+    """
+    Visas efter varje ifylld vecka. Returnerar "" (fortsätt), "F" (fyll på
+    nytt) eller "A" (avsluta). Val O öppnar Excel och visar menyn igen.
+    """
+    notes_text = " och lägg in kommentarerna ovan" if has_notes else ""
+    tell_chrome(
+        f"Granska vecka {week_num}{notes_text}.",
+        "Skicka in veckan om allt ser bra ut.",
+    )
+    enter_text = f"Fortsätt till vecka {next_week}" if next_week else "Avsluta (sista veckan)"
+
+    while True:
+        print()
+        print(f"     [Enter]  {enter_text}")
+        print("     [F]      Töm veckans ej inskickade fält och fyll i på nytt")
+        print("              (t.ex. efter att du lagt till nya rader i Antura)")
+        print("     [O]      Öppna Excel-filen")
+        print("     [A]      Avsluta")
+        choice = (await ask_here("Välj och tryck Enter: ")).upper()
+        if choice == "O":
+            open_excel()
+            continue
+        if choice in ("", "F", "A"):
+            return choice
+        print(f"     Okänt val '{choice}'.")
 
 
 # ============================================================================
@@ -865,34 +939,40 @@ async def main():
         print(f"Veckor att bearbeta: {weeks_to_do}")
 
         # ── Bearbeta varje vecka ──────────────────────────────────────────────
+        choice = ""
         for i, wk in enumerate(weeks_to_do):
+            next_wk = weeks_to_do[i + 1] if i + 1 < len(weeks_to_do) else None
             sep = "─" * 65
             print(f"\n{sep}")
             print(f"  Vecka {wk}  ({i + 1} av {len(weeks_to_do)})")
             print(sep)
-            res = await process_week(page, wk, excel_weeks[wk])
-            print_week_notes(excel_notes.get(wk, []), res)
 
-            # Spara Excel-markeringar efter varje vecka (ger delresultat vid avbrott)
-            if res:
-                mark_excel(wb, wk, res)
-                save_with_retry(lambda: wb.save(EXCEL_FILE), EXCEL_FILE)
+            while True:
+                res = await process_week(page, wk, excel_weeks[wk])
+                print_week_notes(excel_notes.get(wk, []), res)
 
-            # Paus mellan veckor (inte efter sista)
-            if i < len(weeks_to_do) - 1:
-                next_wk = weeks_to_do[i + 1]
-                print()
-                await wait_for_enter(
-                    f"  ✅ Vecka {wk} är ifylld. Granska i Antura och skicka in om allt ser bra ut.\n"
-                    f"     Tryck ENTER när du är redo att gå vidare till vecka {next_wk}… "
-                )
+                # Spara Excel-markeringar efter varje vecka (ger delresultat vid avbrott)
+                if res:
+                    mark_excel(wb, wk, res)
+                    save_with_retry(lambda: wb.save(EXCEL_FILE), EXCEL_FILE)
+
+                print(f"\n  ✅ Vecka {wk} är ifylld.")
+                choice = await week_menu(wk, next_wk, bool(excel_notes.get(wk)))
+                if choice != "F":
+                    break
+                cleared = await clear_week(page)
+                print(f"\n  🧹 Tömde {cleared} fält i vecka {wk}. Fyller i på nytt…")
+
+            if choice == "A":
+                break
 
         # ── Klar ─────────────────────────────────────────────────────────────
         print(f"\n{'=' * 65}")
         print(f"✅ {EXCEL_FILE.name} sparad med markeringar")
         print()
         print("Klart! Granska gula/röda rader i Excel.")
-        print("Tryck INTE på 'Skicka' i Antura – det gör du manuellt.")
+        print("Skriptet har inte skickat in något – kontrollera i Antura att")
+        print("alla veckor du granskat är inskickade.")
 
 
 if __name__ == "__main__":
