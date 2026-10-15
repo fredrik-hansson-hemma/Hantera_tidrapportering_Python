@@ -19,7 +19,7 @@ Det är allt. Inloggning behövs normalt bara första gången – sessionen spar
 ### Steg 1 – Generera Excel-underlagen
 
 Kör `Hantera_tidrapportering.py`, som läser din tidrapportering från
-Grindstone (`.gsjdb`-databasen) och OneDrive-filen `All_my_time.tsv`.
+Grindstone (`.gsjdb`-databasen). Sökvägen anges i `config.py`.
 
 Skriptet skapar eller uppdaterar tre filer i mappen `data\`:
 
@@ -109,10 +109,12 @@ Python 3.13+ och Poetry måste vara installerade sedan tidigare.
 | Fil / mapp | Beskrivning |
 |---|---|
 | `rapportera.bat` | Huvudskript – kör hela flödet i ett |
-| `Hantera_tidrapportering.py` | Läser Grindstone/TSV och genererar Excel-filerna |
+| `Hantera_tidrapportering.py` | Läser Grindstone och genererar Excel-filerna |
 | `antura_filler.py` | Fyller i Antura automatiskt via Playwright |
 | `grindstone_reader.py` | Hjälpmodul för att läsa Grindstone-databasen |
 | `weekly_category_report.py` | Hjälpmodul för kategorirapporten |
+| `config.py` | Sökvägar och adresser (Grindstone-fil, utdatafiler, Antura-URL) |
+| `filhjalp.py` | Gemensam hjälpfunktion för att spara filer som kan vara öppna i Excel |
 | `run.bat` | Kör `Hantera_tidrapportering.py` (används av `rapportera.bat`) |
 | `run_antura.bat` | Kör `antura_filler.py` (används av `rapportera.bat`) |
 | `start_chrome.bat` | Startar Chrome med CDP-stöd (används av `rapportera.bat`) |

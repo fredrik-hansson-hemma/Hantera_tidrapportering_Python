@@ -1,4 +1,6 @@
 @echo off
+:: Filen är sparad i UTF-8 – växla teckentabell så att åäö visas rätt
+chcp 65001 >nul
 title Tidrapportering
 
 :: ============================================================

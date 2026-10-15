@@ -21,29 +21,20 @@ import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from functools import partial
 
 import openpyxl
 from openpyxl.comments import Comment
-from openpyxl.styles import Font, PatternFill
-
-try:
-    from rapidfuzz import fuzz
-    from rapidfuzz import process as rfprocess
-    HAS_RAPIDFUZZ = True
-except ImportError:
-    import difflib
-    HAS_RAPIDFUZZ = False
-
+from openpyxl.styles import PatternFill
 from playwright.async_api import async_playwright
+from rapidfuzz import fuzz
+
+from config import ANTURA_EXCEL_FILE as EXCEL_FILE, ANTURA_URL, CDP_URL
+from filhjalp import save_with_retry
 
 # ============================================================================
 # KONFIGURATION – ändra här om något behöver justeras
+# (sökvägar och adresser finns i config.py)
 # ============================================================================
-
-ANTURA_URL   = "https://ucrantura.ucr.uu.se/Views/MyPlace/TimeReporting/Reporting.aspx"
-EXCEL_FILE   = Path(__file__).parent / "data" / "Tidrapport_Antura.xlsx"
-CDP_URL      = "http://localhost:9222"
 
 # Fuzzy-matchningsgränser (0–100)
 THRESHOLD_OK        = 80   # ≥ 80 → grön  → fylls i automatiskt
@@ -92,10 +83,7 @@ def fuzzy_score(a: str, b: str) -> float:
     frågesträngen men INTE i kandidaten straffas poängen (-15 per sådant tal).
     Det förhindrar t.ex. att '6.11' matchar '6.12'.
     """
-    if HAS_RAPIDFUZZ:
-        base = fuzz.token_sort_ratio(a, b)
-    else:
-        base = difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio() * 100
+    base = fuzz.token_sort_ratio(a, b)
 
     # Nummerjustering
     nums_a = _extract_numbers(a)
@@ -135,10 +123,13 @@ def iso_week(d: date) -> int:
     return d.isocalendar()[1]
 
 
+def monday_of(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
 async def wait_for_enter(prompt: str):
     """Skriver ut en prompt och väntar på Enter utan att blockera event-loopen."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, partial(input, prompt))
+    await asyncio.to_thread(input, prompt)
 
 
 # ============================================================================
@@ -147,18 +138,20 @@ async def wait_for_enter(prompt: str):
 
 def load_excel(
     path: Path,
-) -> tuple[dict[int, list[dict]], dict[int, list[dict]], openpyxl.Workbook]:
+) -> tuple[dict[int, list[dict]], dict[int, list[dict]], dict[int, date], openpyxl.Workbook]:
     """
     Läser alla veckor ur Excel-filen.
 
     Returnerar:
-        weeks  – {veckonr: [{"name": str, "days": {"Mån": float, ...}}, ...]}
-        notes  – {veckonr: [{"date": date, "name": str, "note": str, "hours": float}, ...]}
-        wb     – öppen Workbook (för att kunna spara markeringar)
+        weeks   – {veckonr: [{"name": str, "days": {"Mån": float, ...}}, ...]}
+        notes   – {veckonr: [{"date": date, "name": str, "note": str, "hours": float}, ...]}
+        mondays – {veckonr: måndagens datum} (för sortering över årsskiftet)
+        wb      – öppen Workbook (för att kunna spara markeringar)
     """
     wb = openpyxl.load_workbook(path, data_only=True)
     weeks: dict[int, list[dict]] = {}
     notes: dict[int, list[dict]] = {}
+    mondays: dict[int, date] = {}
 
     for sheet_name in wb.sheetnames:
         m = re.match(r"Vecka\s+(\d+)", sheet_name, re.IGNORECASE)
@@ -166,6 +159,12 @@ def load_excel(
             continue
         week_num = int(m.group(1))
         ws = wb[sheet_name]
+
+        # Rubrikrad: "Vecka 43: 2026-10-19 - 2026-10-25"
+        title = str(ws.cell(1, 1).value or "")
+        dm = re.search(r"(\d{4}-\d{2}-\d{2})", title)
+        if dm:
+            mondays[week_num] = monday_of(date.fromisoformat(dm.group(1)))
 
         items = []
         in_data = False
@@ -202,7 +201,7 @@ def load_excel(
         if week_notes:
             notes[week_num] = week_notes
 
-    return weeks, notes, wb
+    return weeks, notes, mondays, wb
 
 
 def _read_notes(ws) -> list[dict]:
@@ -325,40 +324,39 @@ WEEK_DROPDOWN   = '[name="_toolbar$ctl01$_weekDropDownList"]'
 FILTER_DROPDOWN = '[name="_toolbar$ctl02"]'
 FILTER_ALL      = "All"
 
-async def get_current_week_num(page) -> int | None:
-    """Läser vald vecka direkt från Anturas vecko-dropdown."""
+async def read_week_options(page) -> list[dict]:
+    """
+    Läser alla alternativ i Anturas vecko-dropdown.
+    Varje alternativ: {"week": int | None, "value": str, "selected": bool}.
+    Alternativtexten börjar med "v.43, ...".
+    """
     try:
-        return await page.evaluate(f"""
-            () => {{
-                const sel = document.querySelector('{WEEK_DROPDOWN}');
-                if (!sel) return null;
-                const opt = sel.options[sel.selectedIndex];
-                if (!opt) return null;
-                const m = opt.text.match(/^v\\.(\\d{{1,2}}),/);
-                return m ? parseInt(m[1]) : null;
-            }}
-        """)
+        return await page.evaluate(r"""
+            (selector) => {
+                const sel = document.querySelector(selector);
+                if (!sel) return [];
+                return Array.from(sel.options).map((opt, i) => {
+                    const m = opt.text.match(/^v\.(\d{1,2}),/);
+                    return {
+                        week:     m ? parseInt(m[1]) : null,
+                        value:    opt.value,
+                        selected: i === sel.selectedIndex,
+                    };
+                });
+            }
+        """, WEEK_DROPDOWN)
     except Exception:
-        return None
+        return []
+
+
+async def get_current_week_num(page) -> int | None:
+    """Läser vald vecka från Anturas vecko-dropdown."""
+    return next((o["week"] for o in await read_week_options(page) if o["selected"]), None)
 
 
 async def get_week_option_value(page, target_week: int) -> str | None:
     """Returnerar dropdown-värdet (ett datum-string) för given vecka, eller None."""
-    try:
-        return await page.evaluate(f"""
-            () => {{
-                const sel = document.querySelector('{WEEK_DROPDOWN}');
-                if (!sel) return null;
-                for (const opt of sel.options) {{
-                    const m = opt.text.match(/^v\\.(\\d{{1,2}}),/);
-                    if (m && parseInt(m[1]) === {target_week}) return opt.value;
-                }}
-                return null;
-            }}
-        """)
-    except Exception:
-        return None
-
+    return next((o["value"] for o in await read_week_options(page) if o["week"] == target_week), None)
 
 
 async def read_antura_rows(page) -> list[dict]:
@@ -473,16 +471,15 @@ async def navigate_to_week(page, target_week: int) -> bool:
     # Bekräfta att dropdown faktiskt visar rätt vecka
     try:
         await page.wait_for_function(
-            f"""
-            () => {{
-                const sel = document.querySelector('{WEEK_DROPDOWN}');
-                if (!sel) return false;
-                const opt = sel.options[sel.selectedIndex];
-                if (!opt) return false;
-                const m = opt.text.match(/^v\\.(\\d{{1,2}}),/);
-                return m && parseInt(m[1]) === {target_week};
-            }}
+            r"""
+            ([selector, week]) => {
+                const sel = document.querySelector(selector);
+                const opt = sel?.options[sel.selectedIndex];
+                const m = opt?.text.match(/^v\.(\d{1,2}),/);
+                return m && parseInt(m[1]) === week;
+            }
             """,
+            arg=[WEEK_DROPDOWN, target_week],
             timeout=5_000,
         )
     except Exception:
@@ -497,12 +494,10 @@ async def ensure_filter_all(page):
     Väljer om det om det inte redan är valt och väntar på att AJAX är klar.
     """
     try:
-        current = await page.evaluate(f"""
-            () => {{
-                const sel = document.querySelector('{FILTER_DROPDOWN}');
-                return sel ? sel.value : null;
-            }}
-        """)
+        current = await page.evaluate(
+            "(selector) => document.querySelector(selector)?.value ?? null",
+            FILTER_DROPDOWN,
+        )
         if current == FILTER_ALL:
             return  # Redan rätt, inget att göra
         print("    Filter är inte 'Alla' – ändrar...")
@@ -539,18 +534,16 @@ async def fill_input(page, input_key: str, value: float):
 
     val_str = f"{value:.2f}".replace(".", ",")
 
-    found = await page.evaluate(f"""
-        () => {{
-            const div = document.getElementById('{input_key}');
-            if (!div) return false;
-            const inp = div.querySelector('input');
+    found = await page.evaluate("""
+        ([divId, value]) => {
+            const inp = document.getElementById(divId)?.querySelector('input');
             if (!inp) return false;
-            inp.value = '{val_str}';
-            inp.dispatchEvent(new Event('input',  {{ bubbles: true }}));
-            inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            inp.value = value;
+            inp.dispatchEvent(new Event('input',  { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
             return true;
-        }}
-    """)
+        }
+    """, [input_key, val_str])
 
     if not found:
         print(f"    ⚠️  Fält '{input_key}' hittades inte i DOM:en")
@@ -668,16 +661,7 @@ async def process_week(
     antura_labels = [r["label"] for r in antura_rows]
     label_to_row  = {r["label"]: r for r in antura_rows}
 
-    # Matcha
     results = match_items(excel_items, antura_labels)
-
-    print(f"  Matchningsresultat ({len(results)} Excel-rader):")
-    for r in results:
-        icon = {"ok": "✅", "uncertain": "⚠️ ", "no_match": "❌"}[r["status"]]
-        print(
-            f"    {icon} {r['excel_name'][:45]:<45} → "
-            f"{r['antura_name'][:45]:<45} ({r['score']:.0f}%)"
-        )
 
     # Fyll i
     filled = 0
@@ -706,6 +690,15 @@ async def process_week(
             await fill_input(page, input_key, value)
             filled += 1
             print(f"  Fyll {day_key} '{input_key[-30:]}' = {value:.2f}")
+
+    # Sammanfattningen visas efter ifyllnadsloggen så att den inte scrollar bort
+    print(f"\n  Matchningsresultat ({len(results)} Excel-rader):")
+    for r in results:
+        icon = {"ok": "✅", "uncertain": "⚠️ ", "no_match": "❌"}[r["status"]]
+        print(
+            f"    {icon} {r['excel_name'][:45]:<45} → "
+            f"{r['antura_name'][:45]:<45} ({r['score']:.0f}%)"
+        )
 
     print(f"\n  → {filled} celler ifyllda, {skipped} rader ej matchade/ifyllda")
     return results
@@ -747,21 +740,24 @@ async def main():
     print("  Antura Tidrapporterings-fyllare")
     print("=" * 65)
 
-    if not HAS_RAPIDFUZZ:
-        print("ℹ️  rapidfuzz saknas – använder difflib (lägre precision).")
-        print("   Installera: poetry add rapidfuzz\n")
-
     # ── Ladda Excel ──────────────────────────────────────────────────────────
     if not EXCEL_FILE.exists():
         print(f"❌ Hittade inte {EXCEL_FILE}")
         sys.exit(1)
 
     print(f"\nLäser {EXCEL_FILE.name}…")
-    excel_weeks, excel_notes, wb = load_excel(EXCEL_FILE)
+    excel_weeks, excel_notes, mondays, wb = load_excel(EXCEL_FILE)
     if not excel_weeks:
         print("❌ Inga veckor med data hittades i Excel-filen.")
         sys.exit(1)
-    print(f"  Veckor med data: {sorted(excel_weeks)}")
+
+    # Sortera på veckans måndag, inte veckonummer, så att t.ex. vecka 1
+    # hamnar efter vecka 52 vid årsskiftet
+    def week_start(w: int) -> date:
+        return mondays.get(w, date.max)
+
+    all_weeks = sorted(excel_weeks, key=week_start)
+    print(f"  Veckor med data: {all_weeks}")
 
     # ── Anslut till Chrome ───────────────────────────────────────────────────
     print(f"\nAnsluter till Chrome ({CDP_URL})…")
@@ -772,7 +768,7 @@ async def main():
             browser = await p.chromium.connect_over_cdp(CDP_URL)
         except Exception as exc:
             print(f"\n❌ Kunde inte ansluta: {exc}")
-            print("   Kontrollera att start_chrome.bat körs och att porten är 9222.")
+            print(f"   Kontrollera att start_chrome.bat körs och lyssnar på {CDP_URL}.")
             sys.exit(1)
 
         # Hitta eller öppna Antura-fliken
@@ -813,11 +809,10 @@ async def main():
             # Börja från veckan som innehåller dagen EFTER senast skickade dag.
             # Om senaste skickade dag är söndag (sista dagen i veckan) hamnar
             # nästa dag i nästkommande vecka – och den veckan är den första att fylla.
-            first_unfilled = last_sub + timedelta(days=1)
-            first_week = iso_week(first_unfilled)
-            weeks_to_do = sorted(w for w in excel_weeks if w >= first_week)
+            first_monday = monday_of(last_sub + timedelta(days=1))
+            weeks_to_do = [w for w in all_weeks if week_start(w) >= first_monday]
         else:
-            weeks_to_do = sorted(excel_weeks)
+            weeks_to_do = all_weeks
 
         if not weeks_to_do:
             print("✅ Inga veckor att bearbeta – allt är redan klart!")
@@ -826,20 +821,18 @@ async def main():
         print(f"Veckor att bearbeta: {weeks_to_do}")
 
         # ── Bearbeta varje vecka ──────────────────────────────────────────────
-        all_results: dict[int, list[dict]] = {}
         for i, wk in enumerate(weeks_to_do):
             sep = "─" * 65
             print(f"\n{sep}")
             print(f"  Vecka {wk}  ({i + 1} av {len(weeks_to_do)})")
             print(sep)
             res = await process_week(page, wk, excel_weeks[wk])
-            all_results[wk] = res
             print_week_notes(excel_notes.get(wk, []), res)
 
             # Spara Excel-markeringar efter varje vecka (ger delresultat vid avbrott)
             if res:
                 mark_excel(wb, wk, res)
-                wb.save(EXCEL_FILE)
+                save_with_retry(lambda: wb.save(EXCEL_FILE), EXCEL_FILE)
 
             # Paus mellan veckor (inte efter sista)
             if i < len(weeks_to_do) - 1:
@@ -859,4 +852,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Säkerställ att åäö och symboler kan skrivas ut oavsett konsolens teckentabell
+    sys.stdout.reconfigure(encoding="utf-8")
     asyncio.run(main())
