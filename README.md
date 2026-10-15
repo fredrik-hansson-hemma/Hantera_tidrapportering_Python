@@ -138,7 +138,6 @@ Python 3.13+ och Poetry måste vara installerade sedan tidigare.
 | `chrome_starter.py` | Startar Chrome med CDP-stöd om den inte redan kör |
 | `run.bat` | Kör bara `Hantera_tidrapportering.py` |
 | `run_antura.bat` | Kör bara `antura_filler.py` |
-| `start_chrome.bat` | Används inte längre – ersatt av `chrome_starter.py` |
 | `data\` | Genererade rapportfiler (gitignorerade) |
 | `chrome_profile\` | Sparad Chrome-session (skapas automatiskt, gitignorerad) |
 | `arkiv\` | Inaktuella filer som inte längre används aktivt |
