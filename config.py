@@ -18,7 +18,10 @@ ANTURA_EXCEL_FILE = DATA_DIR / "Tidrapport_Antura.xlsx"
 FLEX_EXCEL_FILE = DATA_DIR / "Tidrapport_Flex.xlsx"
 CATEGORY_HTML_FILE = DATA_DIR / "Tidrapport_Kategoriserad.html"
 
-# Antura och Chrome (start_chrome.bat har egna kopior av URL och port)
+# Antura och Chrome
 ANTURA_URL = "https://ucrantura.ucr.uu.se/Views/MyPlace/TimeReporting/Reporting.aspx"
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}"
+
+# Chrome-profil där Antura-inloggningen sparas mellan körningar
+CHROME_PROFILE_DIR = PROJECT_DIR / "chrome_profile"

@@ -3,12 +3,11 @@ antura_filler.py
 ================
 Fyller automatiskt i Antura tidrapportering från Tidrapport_Antura.xlsx.
 
-Flöde:
-  1. Kör start_chrome.bat  → Chrome startar med fjärrfelsökning aktiverat
-  2. Logga in på Antura manuellt (behövs bara första gången)
-  3. Kör detta skript: poetry run python antura_filler.py
+Körs normalt via rapportera.py, men går också att köra fristående.
 
 Skriptet:
+  - Startar Chrome med fjärrfelsökning om den inte redan är igång
+  - Väntar på att du loggar in på Antura (behövs normalt bara första gången)
   - Hittar senast skickade dag och bearbetar alla veckor från och med den veckan
   - Matchar Excel-rader mot Antura-rader med fuzzy matching
   - Fyller ALDRIG i låsta (redan skickade) celler
@@ -21,6 +20,7 @@ import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import openpyxl
 from openpyxl.comments import Comment
@@ -28,6 +28,7 @@ from openpyxl.styles import PatternFill
 from playwright.async_api import async_playwright
 from rapidfuzz import fuzz
 
+from chrome_starter import ensure_chrome
 from config import ANTURA_EXCEL_FILE as EXCEL_FILE, ANTURA_URL, CDP_URL
 from filhjalp import save_with_retry
 
@@ -436,9 +437,60 @@ async def read_antura_rows(page) -> list[dict]:
     """)
 
 
+async def wait_for_stable_rows(page, timeout_s: float = 15) -> list[dict]:
+    """
+    Läser aktivitetsraderna tills samma (nollskilda) antal syns två gånger i
+    rad med en halv sekunds mellanrum, dvs. sidan har slutat ritas om.
+    Returnerar senast lästa rader (tom lista om inga hittades inom tiden).
+    """
+    rows: list[dict] = []
+    prev_count = -1
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            rows = await read_antura_rows(page)
+        except Exception:
+            rows = []  # Sidan laddas om just nu
+        if rows and len(rows) == prev_count:
+            return rows
+        prev_count = len(rows)
+        await page.wait_for_timeout(500)
+    return rows
+
+
 # ============================================================================
 # PLAYWRIGHT – navigation
 # ============================================================================
+
+async def wait_for_antura_ready(page, timeout_s: float = 600) -> bool:
+    """
+    Väntar tills tidrapporteringssidan med vecko-dropdownen visas.
+    Ber användaren logga in om sidan inte syns, och går till
+    tidrapporteringen om Antura hamnar på en annan sida efter inloggningen.
+    """
+    antura_host = urlparse(ANTURA_URL).netloc
+    asked_login = False
+    deadline = asyncio.get_running_loop().time() + timeout_s
+
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            if await page.query_selector(WEEK_DROPDOWN):
+                return True
+            on_antura = urlparse(page.url).netloc == antura_host
+            if on_antura and "TimeReporting" not in page.url:
+                await page.goto(ANTURA_URL)
+                continue
+        except Exception:
+            pass  # Sidan navigerar just nu, försök igen strax
+
+        if not asked_login:
+            print("\n  👉 Logga in på Antura i Chrome-fönstret.")
+            print("     Skriptet fortsätter automatiskt när tidrapporteringen visas…")
+            asked_login = True
+        await asyncio.sleep(2)
+
+    return False
+
 
 async def navigate_to_week(page, target_week: int) -> bool:
     """
@@ -643,16 +695,15 @@ async def process_week(
     # Säkerställ att alla projekt visas
     await ensure_filter_all(page)
 
-    # ── Vänta på att användaren bekräftar att sidan är klar ──────────────────
-    print()
-    await wait_for_enter(
-        f"  ⏸  Vecka {week_num} vald. Vänta tills sidan är klar i Chrome,\n"
-        f"     tryck sedan ENTER för att börja fylla i… "
-    )
-    print()
-
-    # Läs Antura-rader (hittar inputs via .reportingField-divars FieldsBlock_N-ID)
-    antura_rows = await read_antura_rows(page)
+    # Läs Antura-rader när sidan har laddat klart. Om inget hittas automatiskt
+    # får användaren titta i Chrome och försöka igen.
+    antura_rows = await wait_for_stable_rows(page)
+    if not antura_rows:
+        await wait_for_enter(
+            "  ⚠️  Hittade inga aktivitetsrader. Kontrollera sidan i Chrome och\n"
+            "     tryck ENTER här för att försöka igen… "
+        )
+        antura_rows = await wait_for_stable_rows(page)
     print(f"  Aktivitetsrader: {len(antura_rows)} st")
     if not antura_rows:
         print("  ❌ Inga aktivitetsrader hittades")
@@ -759,43 +810,36 @@ async def main():
     all_weeks = sorted(excel_weeks, key=week_start)
     print(f"  Veckor med data: {all_weeks}")
 
-    # ── Anslut till Chrome ───────────────────────────────────────────────────
-    print(f"\nAnsluter till Chrome ({CDP_URL})…")
-    print("  (Se till att start_chrome.bat är igång och Antura är inloggad)")
+    # ── Starta/anslut till Chrome ────────────────────────────────────────────
+    print("\nChrome:")
+    ensure_chrome()
 
     async with async_playwright() as p:
         try:
             browser = await p.chromium.connect_over_cdp(CDP_URL)
         except Exception as exc:
-            print(f"\n❌ Kunde inte ansluta: {exc}")
-            print(f"   Kontrollera att start_chrome.bat körs och lyssnar på {CDP_URL}.")
+            print(f"\n❌ Kunde inte ansluta till Chrome på {CDP_URL}: {exc}")
             sys.exit(1)
 
-        # Hitta eller öppna Antura-fliken
-        page = None
-        for ctx in browser.contexts:
-            for pg in ctx.pages:
-                if "TimeReporting" in pg.url or "antura" in pg.url.lower():
-                    page = pg
-                    break
-            if page:
-                break
-
-        if not page:
-            ctx  = browser.contexts[0] if browser.contexts else await browser.new_context()
+        # Använd Antura-fliken om den finns, annars första fliken
+        # (som kan stå på inloggningssidan), annars en ny flik
+        antura_host = urlparse(ANTURA_URL).netloc
+        pages = [pg for ctx in browser.contexts for pg in ctx.pages]
+        page = next((pg for pg in pages if urlparse(pg.url).netloc == antura_host), None)
+        if page is None and pages:
+            page = pages[0]
+        if page is None:
+            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await ctx.new_page()
-            print("  Öppnar Antura…")
+        if not page.url.startswith("http"):
             await page.goto(ANTURA_URL)
-            await page.wait_for_load_state("networkidle", timeout=30_000)
 
         await page.bring_to_front()
         print("  ✅ Ansluten")
 
-        if "TimeReporting" not in page.url:
-            await page.goto(ANTURA_URL)
-            await page.wait_for_load_state("networkidle", timeout=30_000)
-
-        await page.wait_for_timeout(1_000)
+        if not await wait_for_antura_ready(page):
+            print("❌ Tidrapporteringen i Antura visades inte inom 10 minuter. Avbryter.")
+            sys.exit(1)
 
         # ── Hitta senast skickade dag ─────────────────────────────────────────
         last_sub = await get_last_submitted_date(page)
