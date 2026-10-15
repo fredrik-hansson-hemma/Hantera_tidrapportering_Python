@@ -145,16 +145,20 @@ async def wait_for_enter(prompt: str):
 # EXCEL – läsa in data
 # ============================================================================
 
-def load_excel(path: Path) -> tuple[dict[int, list[dict]], openpyxl.Workbook]:
+def load_excel(
+    path: Path,
+) -> tuple[dict[int, list[dict]], dict[int, list[dict]], openpyxl.Workbook]:
     """
     Läser alla veckor ur Excel-filen.
 
     Returnerar:
         weeks  – {veckonr: [{"name": str, "days": {"Mån": float, ...}}, ...]}
+        notes  – {veckonr: [{"date": date, "name": str, "note": str, "hours": float}, ...]}
         wb     – öppen Workbook (för att kunna spara markeringar)
     """
     wb = openpyxl.load_workbook(path, data_only=True)
     weeks: dict[int, list[dict]] = {}
+    notes: dict[int, list[dict]] = {}
 
     for sheet_name in wb.sheetnames:
         m = re.match(r"Vecka\s+(\d+)", sheet_name, re.IGNORECASE)
@@ -194,7 +198,49 @@ def load_excel(path: Path) -> tuple[dict[int, list[dict]], openpyxl.Workbook]:
         if items:
             weeks[week_num] = items
 
-    return weeks, wb
+        week_notes = _read_notes(ws)
+        if week_notes:
+            notes[week_num] = week_notes
+
+    return weeks, notes, wb
+
+
+def _read_notes(ws) -> list[dict]:
+    """
+    Läser Anteckningar-sektionen i ett veckoblad.
+    Kolumnerna hittas via rubrikraden (Datum, Work Item, Anteckning, Timmar),
+    så äldre filer utan Work Item-kolumn fungerar också.
+    """
+    result = []
+    header: dict[str, int] | None = None
+    in_notes = False
+
+    for row in ws.iter_rows(values_only=True):
+        if row[0] == "Anteckningar":
+            in_notes = True
+            continue
+        if not in_notes:
+            continue
+        if header is None:
+            if row[0] == "Datum":
+                header = {str(v): i for i, v in enumerate(row) if v}
+            continue
+        if not row[0]:
+            continue
+
+        def col(name: str):
+            idx = header.get(name)
+            return row[idx] if idx is not None and idx < len(row) else None
+
+        raw_date = col("Datum")
+        result.append({
+            "date":  raw_date.date() if hasattr(raw_date, "date") else raw_date,
+            "name":  str(col("Work Item") or "").strip(),
+            "note":  str(col("Anteckning") or "").strip(),
+            "hours": float(col("Timmar") or 0),
+        })
+
+    return result
 
 
 # ============================================================================
@@ -665,6 +711,33 @@ async def process_week(
     return results
 
 
+def print_week_notes(week_notes: list[dict], results: list[dict]):
+    """
+    Listar veckans Grindstone-kommentarer så att de kan läggas in manuellt
+    i Antura. Visar vilken Antura-rad work itemet matchades mot.
+    """
+    if not week_notes:
+        print("\n  📝 Inga kommentarer i Grindstone denna vecka.")
+        return
+
+    excel_to_antura = {
+        r["excel_name"]: r["antura_name"] for r in results if r["status"] != "no_match"
+    }
+
+    print(f"\n  📝 Kommentarer att lägga in manuellt i Antura ({len(week_notes)} st):")
+    for n in week_notes:
+        d = n["date"]
+        day = f"{EXCEL_DAY_KEYS[d.weekday()]} {d.isoformat()}" if isinstance(d, date) else str(d)
+        antura_name = excel_to_antura.get(n["name"])
+        target = f"→ {antura_name}" if antura_name else "→ (ingen matchad Antura-rad)"
+        print(f"    {day}  {n['name'] or '(okänt work item)'}")
+        print(f"      {target}")
+        # Flerradiga kommentarer indenteras så att de hålls ihop visuellt
+        note_text = "\n       ".join(n["note"].splitlines())
+        hours = f"{n['hours']:.2f}".replace(".", ",")
+        print(f"      \"{note_text}\"  ({hours} h)")
+
+
 # ============================================================================
 # HUVUDFUNKTION
 # ============================================================================
@@ -684,7 +757,7 @@ async def main():
         sys.exit(1)
 
     print(f"\nLäser {EXCEL_FILE.name}…")
-    excel_weeks, wb = load_excel(EXCEL_FILE)
+    excel_weeks, excel_notes, wb = load_excel(EXCEL_FILE)
     if not excel_weeks:
         print("❌ Inga veckor med data hittades i Excel-filen.")
         sys.exit(1)
@@ -761,6 +834,7 @@ async def main():
             print(sep)
             res = await process_week(page, wk, excel_weeks[wk])
             all_results[wk] = res
+            print_week_notes(excel_notes.get(wk, []), res)
 
             # Spara Excel-markeringar efter varje vecka (ger delresultat vid avbrott)
             if res:

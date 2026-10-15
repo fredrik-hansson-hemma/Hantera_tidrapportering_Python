@@ -73,7 +73,11 @@ Det här händer i tur och ordning:
    Låsta celler (redan skickade dagar) hoppas alltid över.
    Celler med värdet 0 lämnas orörda.
 
-6. **Sparar markeringar** – `data\Tidrapport_Antura.xlsx` sparas med färgmarkeringar
+6. **Listar veckans kommentarer** – kommentarer som loggats i Grindstone skrivs
+   ut med dag, work item och vilken Antura-rad de hör till. Lägg in dem manuellt
+   i Antura.
+
+7. **Sparar markeringar** – `data\Tidrapport_Antura.xlsx` sparas med färgmarkeringar
    och kommentarer på de rader som var osäkra eller inte matchade.
    Granska gula och röda rader innan du skickar.
 

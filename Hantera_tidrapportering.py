@@ -382,18 +382,24 @@ def create_antura_report(df: pl.DataFrame, output_file: str):
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = "#,##0.00"
 
-        # Anteckningar
-        notes_data = week_data.filter(
-            pl.col("Notes").is_not_null() & (pl.col("Notes") != "")
+        # Anteckningar – en rad per dag, work item och anteckningstext.
+        # Läses av antura_filler.py som listar dem efter ifyllnad.
+        notes_data = (
+            week_data.filter(
+                pl.col("Notes").is_not_null() & (pl.col("Notes").str.strip_chars() != "")
+            )
+            .group_by(["startdatum", "Work Item", "Notes"])
+            .agg(pl.col("DurationTimmar").sum())
+            .sort(["startdatum", "Work Item"])
         )
 
         if len(notes_data) > 0:
             ws.append([])
             ws.append(["Anteckningar"])
-            ws.append(["Datum", "Anteckning", "Timmar"])
+            ws.append(["Datum", "Work Item", "Anteckning", "Timmar"])
 
             for row in notes_data.select(
-                ["startdatum", "Notes", "DurationTimmar"]
+                ["startdatum", "Work Item", "Notes", "DurationTimmar"]
             ).iter_rows():
                 ws.append(list(row))
 
