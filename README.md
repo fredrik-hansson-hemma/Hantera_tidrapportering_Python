@@ -4,22 +4,29 @@
 
 ```
 1. Kör rapportera.bat
-2. Logga in i Antura om det behövs (webbläsaren öppnas automatiskt)
-3. Kontrollera och skicka manuellt i Antura
+2. Logga in i Antura om det behövs (Chrome öppnas automatiskt)
+3. Kontrollera och skicka manuellt i Antura, tryck Enter för nästa vecka
 ```
 
 Det är allt. Inloggning behövs normalt bara första gången – sessionen sparas sedan.
+
+Skriptet visar alltid tydligt var du ska göra något:
+
+- **👉 GÖR I CHROME:** – något ska göras i Chrome-fönstret (logga in, granska, skicka in).
+- **⌨️ HÄR I TERMINALEN:** – skriptet väntar på ett svar i terminalfönstret.
 
 ---
 
 ## Vad som händer i varje steg
 
-`rapportera.bat` kör tre steg i ordning och väntar på en knapptryckning mellan varje.
+`rapportera.bat` kör `rapportera.py`, som gör allt i samma fönster. Du behöver
+bara växla till Chrome för att logga in (om det behövs) och för att granska och
+skicka in varje vecka.
 
 ### Steg 1 – Generera Excel-underlagen
 
 Kör `Hantera_tidrapportering.py`, som läser din tidrapportering från
-Grindstone (`.gsjdb`-databasen) och OneDrive-filen `All_my_time.tsv`.
+Grindstone (`.gsjdb`-databasen). Sökvägen anges i `config.py`.
 
 Skriptet skapar eller uppdaterar tre filer i mappen `data\`:
 
@@ -32,16 +39,17 @@ Skriptet skapar eller uppdaterar tre filer i mappen `data\`:
 Kör det här direkt efter att du avslutat veckan i Grindstone, innan du
 rapporterar i Antura.
 
-### Steg 2 – Starta Chrome med fjärrfelsökning
+### Steg 2 – Starta Chrome och logga in
 
-Startar en separat Chrome-instans med fjärrfelsökning aktiverat på port 9222.
-Chrome öppnas direkt mot Antura-sidan och använder en dedikerad profil
-sparad i mappen `chrome_profile\` i projektmappen.
+Om ingen Chrome med fjärrfelsökning redan kör startas en separat Chrome-instans
+i bakgrunden (port 9222, se `config.py`). Chrome öppnas direkt mot Antura och
+använder en dedikerad profil sparad i mappen `chrome_profile\` i projektmappen.
+Chrome-fönstret ligger kvar när skriptet är klart.
 
-Första gången: logga in med ditt UCR-konto. Sessionen sparas i profilen
-och återanvänds vid nästa körning – du behöver alltså normalt inte logga in igen.
-
-Lämna Chrome-fönstret öppet och inloggat medan steg 3 körs.
+Om du inte är inloggad visas "👉 Logga in på Antura i Chrome-fönstret".
+Logga in med ditt UCR-konto – skriptet fortsätter av sig självt när
+tidrapporteringssidan visas. Sessionen sparas i profilen, så normalt behöver
+du bara logga in första gången.
 
 ### Steg 3 – Fyll i Antura automatiskt
 
@@ -56,7 +64,8 @@ Det här händer i tur och ordning:
    på Antura-sidan för att veta var ifyllningen ska börja.
 
 3. **Navigerar vecka för vecka** – väljer rätt vecka i Anturas dropdown och
-   bearbetar sedan alla veckor framåt som har data i Excel.
+   bearbetar sedan alla veckor framåt som har data i Excel. Skriptet väntar
+   själv tills sidan har laddat klart innan det fyller i.
 
 4. **Matchar aktiviteter** – jämför varje rad i Excel mot raderna i Antura
    med fuzzy matching (ungefärlig textlikhet). Tre strategier prövas i tur och ordning:
@@ -73,9 +82,23 @@ Det här händer i tur och ordning:
    Låsta celler (redan skickade dagar) hoppas alltid över.
    Celler med värdet 0 lämnas orörda.
 
-6. **Sparar markeringar** – `data\Tidrapport_Antura.xlsx` sparas med färgmarkeringar
+6. **Listar veckans kommentarer** – kommentarer som loggats i Grindstone skrivs
+   ut med dag, work item och vilken Antura-rad de hör till. Lägg in dem manuellt
+   i Antura.
+
+7. **Sparar markeringar** – `data\Tidrapport_Antura.xlsx` sparas med färgmarkeringar
    och kommentarer på de rader som var osäkra eller inte matchade.
    Granska gula och röda rader innan du skickar.
+
+8. **Visar en meny** – efter varje vecka granskar du och skickar in i Antura,
+   och väljer sedan i terminalen:
+
+   | Val | Åtgärd |
+   |---|---|
+   | Enter | Fortsätt till nästa vecka (eller avsluta efter sista veckan) |
+   | F | Töm veckans ej inskickade fält och fyll i på nytt – t.ex. efter att du lagt till nya rader i Antura |
+   | O | Öppna Excel-filen för att jämföra med Antura (stäng den innan du går vidare) |
+   | A | Avsluta |
 
 ### Kontrollera och skicka manuellt
 
@@ -104,14 +127,17 @@ Python 3.13+ och Poetry måste vara installerade sedan tidigare.
 
 | Fil / mapp | Beskrivning |
 |---|---|
-| `rapportera.bat` | Huvudskript – kör hela flödet i ett |
-| `Hantera_tidrapportering.py` | Läser Grindstone/TSV och genererar Excel-filerna |
+| `rapportera.bat` | Huvudskript – dubbelklicka för att köra hela flödet |
+| `rapportera.py` | Kör hela flödet: Excel-underlag, Chrome och Antura-ifyllnad |
+| `Hantera_tidrapportering.py` | Läser Grindstone och genererar Excel-filerna |
 | `antura_filler.py` | Fyller i Antura automatiskt via Playwright |
 | `grindstone_reader.py` | Hjälpmodul för att läsa Grindstone-databasen |
 | `weekly_category_report.py` | Hjälpmodul för kategorirapporten |
-| `run.bat` | Kör `Hantera_tidrapportering.py` (används av `rapportera.bat`) |
-| `run_antura.bat` | Kör `antura_filler.py` (används av `rapportera.bat`) |
-| `start_chrome.bat` | Startar Chrome med CDP-stöd (används av `rapportera.bat`) |
+| `config.py` | Sökvägar och adresser (Grindstone-fil, utdatafiler, Antura-URL) |
+| `filhjalp.py` | Gemensam hjälpfunktion för att spara filer som kan vara öppna i Excel |
+| `chrome_starter.py` | Startar Chrome med CDP-stöd om den inte redan kör |
+| `run.bat` | Kör bara `Hantera_tidrapportering.py` |
+| `run_antura.bat` | Kör bara `antura_filler.py` |
 | `data\` | Genererade rapportfiler (gitignorerade) |
 | `chrome_profile\` | Sparad Chrome-session (skapas automatiskt, gitignorerad) |
 | `arkiv\` | Inaktuella filer som inte längre används aktivt |

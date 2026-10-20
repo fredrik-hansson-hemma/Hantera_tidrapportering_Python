@@ -4,10 +4,13 @@ Skapar en HTML-rapport med stapeldiagram och tabeller för de senaste 20 veckorn
 Kategoriserar tidsposter i tre grupper: Övrigt, Python/Soreg, och Övrig tid
 """
 
+from pathlib import Path
+
 import polars as pl
-import sys
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
+
+from filhjalp import save_with_retry
 
 
 def categorize_work_items(df: pl.DataFrame) -> pl.DataFrame:
@@ -53,19 +56,19 @@ def get_week_data(df: pl.DataFrame, weeks_back: int = 20) -> list:
     # Hämta unika veckor sorterade i omvänd ordning (nyaste först)
     weeks = (
         df_filtered
-        .select(["ar", "Vecka"])
+        .select(["iso_ar", "Vecka"])
         .unique()
-        .sort(["ar", "Vecka"], descending=[True, True])
+        .sort(["iso_ar", "Vecka"], descending=[True, True])
     )
 
     week_data = []
     for row in weeks.iter_rows(named=True):
-        ar = row["ar"]
+        ar = row["iso_ar"]
         vecka = row["Vecka"]
 
         # Filtrera data för denna vecka
         week_df = df_filtered.filter(
-            (pl.col("ar") == ar) & (pl.col("Vecka") == vecka)
+            (pl.col("iso_ar") == ar) & (pl.col("Vecka") == vecka)
         )
 
         week_data.append((ar, vecka, week_df))
@@ -356,39 +359,21 @@ def generate_html_report(week_data: list, output_file: str = "Tidrapport_Kategor
 </html>
 """
 
-    # Skriv till fil
-    def _write_html():
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(html)
+    save_with_retry(lambda: Path(output_file).write_text(html, encoding='utf-8'), output_file)
 
-    while True:
-        try:
-            _write_html()
-            break
-        except PermissionError:
-            print(f"\nKunde inte skriva till '{output_file}'.")
-            print("Filen kan vara öppen i ett annat program.")
-            print("  1. Försök igen")
-            print("  2. Avsluta programmet")
-            val = input("Välj (1/2): ").strip()
-            if val == "2":
-                print("Avslutar.")
-                sys.exit(1)
-            print("Försöker igen...")
-
-    print(f"Kategoriserad veckerapport sparad: {output_file}")
+    print(f"Kategoriserad veckorapport sparad: {output_file}")
 
 
 def create_category_report(df: pl.DataFrame, output_file: str = "Tidrapport_Kategoriserad.html", weeks_back: int = 20):
     """
-    Huvudfunktion för att skapa kategoriserad veckerapport
+    Huvudfunktion för att skapa kategoriserad veckorapport
 
     Args:
-        df: Polars DataFrame med tidrapportdata (måste ha kolumnerna Work Item, DurationTimmar, startdatum, Vecka, ar)
+        df: Polars DataFrame med tidrapportdata (måste ha kolumnerna Work Item, DurationTimmar, startdatum, Vecka, iso_ar)
         output_file: Namn på HTML-filen som ska skapas
         weeks_back: Antal veckor bakåt att visa (default 20)
     """
-    print(f"\n=== Skapar kategoriserad veckerapport ({weeks_back} veckor) ===")
+    print(f"\n=== Skapar kategoriserad veckorapport ({weeks_back} veckor) ===")
 
     # Hämta data för de senaste veckorna
     week_data = get_week_data(df, weeks_back)

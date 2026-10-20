@@ -5,3 +5,4 @@ poetry.lock
 tmpclaude*
 __pycache__/
 .venv/
+arkiv/

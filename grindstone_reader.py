@@ -1,7 +1,7 @@
 """
 Grindstone Database Reader
 Läser tidsposter från en Grindstone .gsjdb-fil (JSON-format)
-och returnerar en Polars DataFrame kompatibel med load_time_data().
+och returnerar en Polars DataFrame.
 """
 
 import json
@@ -37,8 +37,8 @@ def load_grindstone_data(filepath: str) -> pl.DataFrame:
     # Bygg task-ID → task-namn lookup
     tasks = {task["i"]: task["n"] for task in data["f"]["t"]}
 
-    # Beräkna cutoff-datum: 11 månader tillbaka från den 1:a i nuvarande månad
-    # Ger exakt 12 unika kalendermånader (kravet i validate_single_month)
+    # Beräkna cutoff-datum: 11 månader tillbaka från den 1:a i nuvarande månad,
+    # dvs. 12 kalendermånader inklusive innevarande
     cutoff = (datetime.now(timezone.utc).replace(day=1) - relativedelta(months=11)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -116,8 +116,7 @@ def _read_json(filepath: str) -> dict:
 def _utc_to_local_naive(dt: datetime) -> datetime:
     """
     Konverterar en UTC-medveten datetime till en naiv lokal datetime.
-    Befintlig TSV-data använder naiva lokala tidsstämplar,
-    så vi måste matcha det formatet.
+    Resten av flödet räknar med naiva lokala tidsstämplar.
     """
     if dt.tzinfo is not None:
         local_dt = dt.astimezone()
